@@ -93,10 +93,6 @@
       transition: background 0.2s;
     }
     button.action:hover { background: #c73a52; }
-    button.action:disabled {
-      background: #555;
-      cursor: not-allowed;
-    }
     .message {
       margin-top: 16px;
       padding: 16px;
@@ -108,9 +104,37 @@
     .message.error { background: rgba(233, 69, 96, 0.2); border: 1px solid #e94560; }
     .message.info { background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; }
     .match-name {
-      font-size: 1.4rem;
+      font-size: 1.6rem;
       color: #2ecc71;
       font-weight: bold;
+      display: block;
+      margin-top: 8px;
+    }
+    .welcome-banner {
+      background: rgba(52, 152, 219, 0.15);
+      border: 1px solid #3498db;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .welcome-banner .name {
+      color: #3498db;
+      font-weight: bold;
+      font-size: 1.1rem;
+    }
+    .welcome-banner .status {
+      color: #888;
+      font-size: 0.85rem;
+      margin-top: 4px;
+    }
+    .logout-link {
+      color: #e94560;
+      cursor: pointer;
+      font-size: 0.8rem;
+      text-decoration: underline;
+      margin-top: 6px;
+      display: inline-block;
     }
     .people-count {
       text-align: center;
@@ -125,31 +149,30 @@
     <h1>Random Person Matcher</h1>
     <p class="subtitle">Join the pool, get matched, check your pairing privately</p>
 
-    <div class="tab-bar">
-      <button class="active" data-tab="join">Join</button>
-      <button data-tab="check">Check Match</button>
-      <button data-tab="admin">Admin</button>
+    <!-- Shown when user is recognized -->
+    <div id="welcome" style="display:none;">
+      <div class="welcome-banner">
+        <div class="name" id="welcome-name"></div>
+        <div class="status" id="welcome-status"></div>
+        <span class="logout-link" onclick="logout()">Not you? Switch person</span>
+      </div>
+      <div id="match-result"></div>
     </div>
 
-    <div id="join-section" class="section active">
+    <!-- Shown when no user is cached -->
+    <div id="join-section">
       <label for="join-name">Your Name</label>
-      <input type="text" id="join-name" placeholder="Enter your name">
-      <label for="join-pass">Choose a Password</label>
-      <input type="password" id="join-pass" placeholder="Pick a password you'll remember">
+      <input type="text" id="join-name" placeholder="Enter your name to join">
       <button class="action" onclick="joinPool()">Join the Pool</button>
       <div id="join-message"></div>
     </div>
 
-    <div id="check-section" class="section">
-      <label for="check-name">Your Name</label>
-      <input type="text" id="check-name" placeholder="Enter your name">
-      <label for="check-pass">Your Password</label>
-      <input type="password" id="check-pass" placeholder="Enter your password">
-      <button class="action" onclick="checkMatch()">Check My Match</button>
-      <div id="check-message"></div>
+    <!-- Admin toggle -->
+    <div style="margin-top: 24px; text-align: center;">
+      <span class="logout-link" onclick="toggleAdmin()" id="admin-toggle-link">Admin</span>
     </div>
 
-    <div id="admin-section" class="section">
+    <div id="admin-section" style="display:none; margin-top: 16px;">
       <label for="admin-pass">Admin Password</label>
       <input type="password" id="admin-pass" placeholder="Enter admin password">
       <button class="action" id="admin-login-btn" onclick="adminLogin()">Login</button>
@@ -163,55 +186,37 @@
   </div>
 
   <script>
-    const STORAGE_KEY = 'random_matcher_data';
+    const POOL_KEY = 'matcher_pool';
+    const USER_KEY = 'matcher_my_id';
     const ADMIN_PASS = 'matcher2024';
 
-    // --- Hashing ---
-    async function hashStr(str) {
-      const data = new TextEncoder().encode(str);
-      const buf = await crypto.subtle.digest('SHA-256', data);
-      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    function generateId() {
+      return crypto.getRandomValues(new Uint8Array(16)).reduce((s, b) => s + b.toString(16).padStart(2, '0'), '');
     }
 
-    // --- Simple XOR encrypt/decrypt with a key (not cryptographically strong, but hides plaintext from casual browsing) ---
-    function xorEncrypt(text, key) {
-      let result = '';
-      for (let i = 0; i < text.length; i++) {
-        result += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
-      }
-      return btoa(result);
+    function getPool() {
+      try {
+        const raw = localStorage.getItem(POOL_KEY);
+        if (!raw) return { people: {}, matches: {}, matched: false };
+        return JSON.parse(raw);
+      } catch { return { people: {}, matches: {}, matched: false }; }
     }
 
-    function xorDecrypt(encoded, key) {
-      const text = atob(encoded);
-      let result = '';
-      for (let i = 0; i < text.length; i++) {
-        result += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
-      }
-      return result;
+    function savePool(pool) {
+      localStorage.setItem(POOL_KEY, JSON.stringify(pool));
     }
 
-    // --- Data ---
-    function getData() {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return { people: [], matches: {}, matched: false };
-      try { return JSON.parse(raw); } catch { return { people: [], matches: {}, matched: false }; }
+    function getMyId() {
+      try { return localStorage.getItem(USER_KEY); } catch { return null; }
     }
 
-    function saveData(data) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    function setMyId(id) {
+      try { localStorage.setItem(USER_KEY, id); } catch {}
     }
 
-    // --- Tabs ---
-    document.querySelectorAll('.tab-bar button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const tab = btn.dataset.tab;
-        document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-        document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
-        document.getElementById(tab + '-section').classList.add('active');
-        btn.classList.add('active');
-      });
-    });
+    function clearMyId() {
+      try { localStorage.removeItem(USER_KEY); } catch {}
+    }
 
     function showMessage(elementId, text, type) {
       const el = document.getElementById(elementId);
@@ -219,90 +224,83 @@
       el.innerHTML = text;
     }
 
-    // --- Join ---
-    async function joinPool() {
+    // --- Render the right view ---
+    function render() {
+      const myId = getMyId();
+      const pool = getPool();
+      const me = myId ? pool.people[myId] : null;
+
+      if (me) {
+        document.getElementById('join-section').style.display = 'none';
+        document.getElementById('welcome').style.display = 'block';
+        document.getElementById('welcome-name').textContent = me.name;
+
+        if (pool.matched) {
+          const myMatch = pool.matches[myId];
+          if (myMatch) {
+            document.getElementById('welcome-status').textContent = 'You have a match!';
+            document.getElementById('match-result').innerHTML =
+              `<div class="message success">Your match is:<span class="match-name">${myMatch}</span></div>`;
+          } else {
+            document.getElementById('welcome-status').textContent = 'Odd number of people — you\'ll be in the next round.';
+            document.getElementById('match-result').innerHTML =
+              `<div class="message info">You weren't paired this round (odd number). Try next round!</div>`;
+          }
+        } else {
+          document.getElementById('welcome-status').textContent = 'You\'re in the pool. Waiting for matching...';
+          document.getElementById('match-result').innerHTML =
+            `<div class="message info">Hang tight! The admin hasn't run the matching yet. Come back and check anytime.</div>`;
+        }
+      } else {
+        document.getElementById('join-section').style.display = 'block';
+        document.getElementById('welcome').style.display = 'none';
+      }
+    }
+
+    function joinPool() {
       const name = document.getElementById('join-name').value.trim();
-      const pass = document.getElementById('join-pass').value;
-
-      if (!name) { showMessage('join-message', 'Please enter your name.', 'error'); return; }
-      if (!pass || pass.length < 3) { showMessage('join-message', 'Password must be at least 3 characters.', 'error'); return; }
-
-      const nameKey = name.toLowerCase();
-      const nameHash = await hashStr(nameKey);
-      const passHash = await hashStr(nameKey + ':' + pass);
-
-      const data = getData();
-
-      if (data.people.find(p => p.nameHash === nameHash)) {
-        showMessage('join-message', `The name "<strong>${name}</strong>" is already taken. If that's you, go to Check Match to see your pairing.`, 'info');
+      if (!name) {
+        showMessage('join-message', 'Please enter your name.', 'error');
         return;
       }
 
-      if (data.matched) {
+      const pool = getPool();
+
+      if (pool.matched) {
         showMessage('join-message', 'Matching has already been done. Ask the admin to reset for a new round.', 'error');
         return;
       }
 
-      data.people.push({ nameHash, passHash, displayName: name });
-      saveData(data);
+      const nameLower = name.toLowerCase();
+      const existingId = Object.keys(pool.people).find(id => pool.people[id].name.toLowerCase() === nameLower);
+      if (existingId) {
+        showMessage('join-message', `"${name}" is already in the pool. If that's you on a new device, ask the admin.`, 'error');
+        return;
+      }
+
+      const id = generateId();
+      pool.people[id] = { name };
+      savePool(pool);
+      setMyId(id);
 
       document.getElementById('join-name').value = '';
-      document.getElementById('join-pass').value = '';
-      showMessage('join-message',
-        `Welcome, <strong>${name}</strong>! You're in the pool.<br><br>Remember your name and password to check your match later. Only you can see who you're paired with.`,
-        'success');
+      render();
     }
 
-    // --- Check match ---
-    async function checkMatch() {
-      const name = document.getElementById('check-name').value.trim();
-      const pass = document.getElementById('check-pass').value;
-
-      if (!name || !pass) { showMessage('check-message', 'Please enter your name and password.', 'error'); return; }
-
-      const nameKey = name.toLowerCase();
-      const nameHash = await hashStr(nameKey);
-      const passHash = await hashStr(nameKey + ':' + pass);
-
-      const data = getData();
-      const person = data.people.find(p => p.nameHash === nameHash);
-
-      if (!person) {
-        showMessage('check-message', 'Name not found. Did you join the pool first?', 'error');
-        return;
-      }
-
-      if (person.passHash !== passHash) {
-        showMessage('check-message', 'Wrong password. Try again.', 'error');
-        return;
-      }
-
-      if (!data.matched) {
-        showMessage('check-message',
-          `Hi <strong>${person.displayName}</strong>! Matching hasn't been done yet. Check back later.`,
-          'info');
-        return;
-      }
-
-      const encryptedMatch = data.matches[nameHash];
-      if (!encryptedMatch) {
-        showMessage('check-message',
-          `Hi <strong>${person.displayName}</strong>! You weren't included in this round (odd number of people). Try next round!`,
-          'info');
-        return;
-      }
-
-      const matchName = xorDecrypt(encryptedMatch, passHash);
-
-      showMessage('check-message',
-        `Hi <strong>${person.displayName}</strong>! Your match is:<br><br><span class="match-name">${matchName}</span>`,
-        'success');
+    function logout() {
+      clearMyId();
+      document.getElementById('join-message').innerHTML = '';
+      render();
     }
 
     // --- Admin ---
+    function toggleAdmin() {
+      const sec = document.getElementById('admin-section');
+      sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
+    }
+
     function adminLogin() {
-      const pass = document.getElementById('admin-pass').value;
-      if (pass === ADMIN_PASS) {
+      if (document.getElementById('admin-pass').value === ADMIN_PASS) {
         document.getElementById('admin-controls').style.display = 'block';
         document.getElementById('admin-pass').style.display = 'none';
         document.getElementById('admin-login-btn').style.display = 'none';
@@ -314,10 +312,10 @@
     }
 
     function updatePoolCount() {
-      const data = getData();
-      const status = data.matched ? ' (matched)' : ' (waiting)';
-      document.getElementById('pool-count').textContent =
-        `${data.people.length} people in the pool${status}`;
+      const pool = getPool();
+      const count = Object.keys(pool.people).length;
+      const status = pool.matched ? ' (matched)' : ' (waiting)';
+      document.getElementById('pool-count').textContent = `${count} people in the pool${status}`;
     }
 
     function shuffle(arr) {
@@ -330,36 +328,41 @@
     }
 
     function runMatching() {
-      const data = getData();
-      if (data.people.length < 2) {
+      const pool = getPool();
+      const ids = Object.keys(pool.people);
+      if (ids.length < 2) {
         showMessage('admin-message', 'Need at least 2 people to match.', 'error');
         return;
       }
 
-      const shuffled = shuffle(data.people);
-      data.matches = {};
+      const shuffled = shuffle(ids);
+      pool.matches = {};
 
       for (let i = 0; i < shuffled.length - 1; i += 2) {
-        const a = shuffled[i];
-        const b = shuffled[i + 1];
-        data.matches[a.nameHash] = xorEncrypt(b.displayName, a.passHash);
-        data.matches[b.nameHash] = xorEncrypt(a.displayName, b.passHash);
+        pool.matches[shuffled[i]] = pool.people[shuffled[i + 1]].name;
+        pool.matches[shuffled[i + 1]] = pool.people[shuffled[i]].name;
       }
 
-      data.matched = true;
-      saveData(data);
+      pool.matched = true;
+      savePool(pool);
       updatePoolCount();
-      showMessage('admin-message',
-        `Matched ${Math.floor(shuffled.length / 2)} pairs!${shuffled.length % 2 ? ' (1 person left unmatched — odd number)' : ''}`,
-        'success');
+      render();
+
+      const pairs = Math.floor(shuffled.length / 2);
+      const odd = shuffled.length % 2 ? ' (1 person left unmatched)' : '';
+      showMessage('admin-message', `Matched ${pairs} pairs!${odd}`, 'success');
     }
 
     function resetPool() {
       if (!confirm('Reset everything? All people and matches will be cleared.')) return;
-      saveData({ people: [], matches: {}, matched: false });
+      savePool({ people: {}, matches: {}, matched: false });
+      clearMyId();
       updatePoolCount();
-      showMessage('admin-message', 'Pool has been reset. Ready for new round.', 'success');
+      render();
+      showMessage('admin-message', 'Pool has been reset.', 'success');
     }
+
+    render();
   </script>
 </body>
 </html>
