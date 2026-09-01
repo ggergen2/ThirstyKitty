@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Random Person Matcher</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .container {
+      background: #16213e;
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 8px;
+      font-size: 1.8rem;
+      color: #e94560;
+    }
+    .subtitle {
+      text-align: center;
+      color: #888;
+      margin-bottom: 30px;
+      font-size: 0.9rem;
+    }
+    .tab-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+    .tab-bar button {
+      flex: 1;
+      padding: 10px;
+      border: 2px solid #e94560;
+      background: transparent;
+      color: #e94560;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    .tab-bar button.active {
+      background: #e94560;
+      color: #fff;
+    }
+    .tab-bar button:hover:not(.active) {
+      background: rgba(233, 69, 96, 0.15);
+    }
+    .section { display: none; }
+    .section.active { display: block; }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+      color: #ccc;
+    }
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #333;
+      border-radius: 8px;
+      background: #0f3460;
+      color: #eee;
+      font-size: 1rem;
+      margin-bottom: 16px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: #e94560; }
+    button.action {
+      width: 100%;
+      padding: 12px;
+      background: #e94560;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button.action:hover { background: #c73a52; }
+    button.action:disabled {
+      background: #555;
+      cursor: not-allowed;
+    }
+    .message {
+      margin-top: 16px;
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+    .message.success { background: rgba(39, 174, 96, 0.2); border: 1px solid #27ae60; }
+    .message.error { background: rgba(233, 69, 96, 0.2); border: 1px solid #e94560; }
+    .message.info { background: rgba(52, 152, 219, 0.2); border: 1px solid #3498db; }
+    .secret-code {
+      font-family: monospace;
+      font-size: 1.3rem;
+      color: #f1c40f;
+      font-weight: bold;
+      user-select: all;
+    }
+    .match-name {
+      font-size: 1.4rem;
+      color: #2ecc71;
+      font-weight: bold;
+    }
+    .people-count {
+      text-align: center;
+      color: #888;
+      margin-bottom: 16px;
+      font-size: 0.85rem;
+    }
+    .admin-section { margin-top: 20px; padding-top: 20px; border-top: 1px solid #333; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Random Person Matcher</h1>
+    <p class="subtitle">Join the pool, get matched, check your pairing privately</p>
+
+    <div class="tab-bar">
+      <button class="active" onclick="showTab('join')">Join</button>
+      <button onclick="showTab('check')">Check Match</button>
+      <button onclick="showTab('admin')">Admin</button>
+    </div>
+
+    <div id="join-section" class="section active">
+      <label for="join-name">Your Name</label>
+      <input type="text" id="join-name" placeholder="Enter your name">
+      <button class="action" onclick="joinPool()">Join the Pool</button>
+      <div id="join-message"></div>
+    </div>
+
+    <div id="check-section" class="section">
+      <label for="check-code">Your Secret Code</label>
+      <input type="text" id="check-code" placeholder="Enter your secret code">
+      <button class="action" onclick="checkMatch()">Check My Match</button>
+      <div id="check-message"></div>
+    </div>
+
+    <div id="admin-section" class="section">
+      <label for="admin-pass">Admin Password</label>
+      <input type="password" id="admin-pass" placeholder="Enter admin password">
+      <button class="action" onclick="adminLogin()">Login</button>
+      <div id="admin-controls" style="display:none;">
+        <p class="people-count" id="pool-count"></p>
+        <button class="action" onclick="runMatching()" style="margin-bottom:12px;">Run Matching</button>
+        <button class="action" onclick="resetPool()" style="background:#e67e22;">Reset All</button>
+      </div>
+      <div id="admin-message"></div>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'random_matcher_data';
+    const ADMIN_PASS = 'matcher2024';
+
+    function getData() {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return { people: [], matches: {}, matched: false };
+      try { return JSON.parse(raw); } catch { return { people: [], matches: {}, matched: false }; }
+    }
+
+    function saveData(data) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    }
+
+    function generateCode() {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let code = '';
+      for (let i = 0; i < 8; i++) {
+        code += chars[Math.floor(Math.random() * chars.length)];
+      }
+      return code;
+    }
+
+    function showTab(tab) {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+      document.getElementById(tab + '-section').classList.add('active');
+      document.querySelectorAll('.tab-bar button').forEach(b => {
+        if (b.textContent.toLowerCase().includes(tab)) b.classList.add('active');
+      });
+    }
+
+    function showMessage(elementId, text, type) {
+      const el = document.getElementById(elementId);
+      el.className = 'message ' + type;
+      el.innerHTML = text;
+    }
+
+    function joinPool() {
+      const nameInput = document.getElementById('join-name');
+      const name = nameInput.value.trim();
+      if (!name) {
+        showMessage('join-message', 'Please enter your name.', 'error');
+        return;
+      }
+
+      const data = getData();
+
+      const existing = data.people.find(p => p.name.toLowerCase() === name.toLowerCase());
+      if (existing) {
+        showMessage('join-message',
+          `You're already in the pool! Your secret code is: <span class="secret-code">${existing.code}</span><br><br>Save this code to check your match later.`,
+          'info');
+        return;
+      }
+
+      if (data.matched) {
+        showMessage('join-message', 'Matching has already been done. Ask the admin to reset for a new round.', 'error');
+        return;
+      }
+
+      const code = generateCode();
+      data.people.push({ name, code });
+      saveData(data);
+
+      nameInput.value = '';
+      showMessage('join-message',
+        `Welcome, <strong>${name}</strong>! You're in the pool.<br><br>Your secret code: <span class="secret-code">${code}</span><br><br><strong>Save this code!</strong> You'll need it to see your match. No one else can see who you're paired with.`,
+        'success');
+    }
+
+    function checkMatch() {
+      const codeInput = document.getElementById('check-code');
+      const code = codeInput.value.trim().toUpperCase();
+      if (!code) {
+        showMessage('check-message', 'Please enter your secret code.', 'error');
+        return;
+      }
+
+      const data = getData();
+      const person = data.people.find(p => p.code === code);
+
+      if (!person) {
+        showMessage('check-message', 'Invalid code. Please check and try again.', 'error');
+        return;
+      }
+
+      if (!data.matched) {
+        showMessage('check-message',
+          `Hi <strong>${person.name}</strong>! Matching hasn't been done yet. Check back later.`,
+          'info');
+        return;
+      }
+
+      const matchName = data.matches[person.code];
+      if (!matchName) {
+        showMessage('check-message',
+          `Hi <strong>${person.name}</strong>! You weren't included in this round of matching (odd number of people). Try next round!`,
+          'info');
+        return;
+      }
+
+      showMessage('check-message',
+        `Hi <strong>${person.name}</strong>! Your match is:<br><br><span class="match-name">${matchName}</span>`,
+        'success');
+    }
+
+    function adminLogin() {
+      const pass = document.getElementById('admin-pass').value;
+      if (pass === ADMIN_PASS) {
+        document.getElementById('admin-controls').style.display = 'block';
+        document.getElementById('admin-pass').style.display = 'none';
+        document.querySelector('#admin-section .action').style.display = 'none';
+        updatePoolCount();
+        showMessage('admin-message', 'Logged in as admin.', 'success');
+      } else {
+        showMessage('admin-message', 'Wrong password.', 'error');
+      }
+    }
+
+    function updatePoolCount() {
+      const data = getData();
+      const status = data.matched ? ' (matched)' : ' (waiting)';
+      document.getElementById('pool-count').textContent =
+        `${data.people.length} people in the pool${status}`;
+    }
+
+    function shuffle(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    function runMatching() {
+      const data = getData();
+      if (data.people.length < 2) {
+        showMessage('admin-message', 'Need at least 2 people to match.', 'error');
+        return;
+      }
+
+      const shuffled = shuffle(data.people);
+      data.matches = {};
+
+      for (let i = 0; i < shuffled.length - 1; i += 2) {
+        data.matches[shuffled[i].code] = shuffled[i + 1].name;
+        data.matches[shuffled[i + 1].code] = shuffled[i].name;
+      }
+
+      data.matched = true;
+      saveData(data);
+      updatePoolCount();
+      showMessage('admin-message',
+        `Matched ${Math.floor(shuffled.length / 2)} pairs!${shuffled.length % 2 ? ' (1 person left unmatched — odd number)' : ''}`,
+        'success');
+    }
+
+    function resetPool() {
+      if (!confirm('Reset everything? All people and matches will be cleared.')) return;
+      saveData({ people: [], matches: {}, matched: false });
+      updatePoolCount();
+      showMessage('admin-message', 'Pool has been reset. Ready for new round.', 'success');
+    }
+  </script>
+</body>
+</html>
